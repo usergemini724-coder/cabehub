@@ -1,7 +1,8 @@
 --[[
-	CABEHUB  ·  Steal An Egg (Roblox)
+	CABEHUB v2.1-stealth  ·  Steal An Egg (Roblox)
 	------------------------------------------------------------
 	Hub all-in-one TANPA signin/key. PlaceId: 107778070777162.
+	v2.1: teleport humanized (multi-hop + cooldown + jitter),
 	Executor: Solara / Delta / Xeno / Wave / Real.
 
 	TAB EGG FINDER : scanner map-wide, rarity engine resmi (10 tier),
@@ -327,6 +328,12 @@ local CONFIG = {
 	-- MISC
 	antiAfk = false,
 	fpsBoost = false,
+	-- STEALTH (humanized teleport, anti-flag validasi server)
+	tpCooldown = 1.5,       -- jeda minimal antar teleport (detik)
+	tpSteps = 8,            -- jumlah hop per teleport
+	tpHopDelay = 0.03,      -- delay antar hop (detik)
+	tpJitter = 2.0,         -- acak posisi landing (studs)
+	stealJitter = 1.2,      -- acak jeda antar steal (detik)
 	minRarity = "Rare",        -- filter rarity minimum default
 	esp = true,
 	espMax = 120,              -- batas instance ESP
@@ -661,10 +668,33 @@ end
 --==================================================================
 -- 7. ACTIONS
 --==================================================================
+local lastTpAt = 0
 local function teleportTo(pos)
 	local hrp = rootPart()
 	if not hrp or not pos then return false end
-	hrp.CFrame = CFrame.new(pos + CONFIG.tpOffset)
+	-- 1. global cooldown: lompatan posisi beruntun = flag utama server
+	local gap = os.clock() - lastTpAt
+	if gap < CONFIG.tpCooldown then
+		task.wait(CONFIG.tpCooldown - gap)
+	end
+	lastTpAt = os.clock()
+	-- 2. humanized: multi-hop LERP + jitter sudut & landing
+	local dest = CFrame.new(pos + CONFIG.tpOffset)
+		* CFrame.Angles(0, (math.random() - 0.5) * 0.6, 0)
+	local start = hrp.CFrame
+	local hops = CONFIG.tpSteps + math.random(0, 2)
+	for i = 1, hops do
+		local alpha = i / hops
+		local jit = Vector3.new(
+			(math.random() - 0.5) * CONFIG.tpJitter,
+			(math.random() - 0.5) * CONFIG.tpJitter * 0.4,
+			(math.random() - 0.5) * CONFIG.tpJitter)
+		hrp.CFrame = start:Lerp(dest, alpha) + jit
+		hrp.AssemblyLinearVelocity = Vector3.zero
+		hrp.AssemblyAngularVelocity = Vector3.zero
+		task.wait(CONFIG.tpHopDelay)
+	end
+	hrp.CFrame = dest
 	hrp.AssemblyLinearVelocity = Vector3.zero
 	hrp.AssemblyAngularVelocity = Vector3.zero
 	return true
@@ -716,6 +746,7 @@ local autoStealRunning = false
 local function autoStealLoop()
 	if autoStealRunning then return end
 	autoStealRunning = true
+	local lastTargetName = nil
 	task.spawn(function()
 		while State.running and CONFIG.autoSteal do
 			local target = Logic.best(State.current, {
@@ -723,12 +754,20 @@ local function autoStealLoop()
 				hideOwn = true,
 			})
 			if target and not State.busy then
-				State.busy = true
-				goTo(target, true)
-				task.wait(0.35)
-				State.busy = false
+				local name = target.inst and target.inst.Name
+				if name == lastTargetName then
+					-- egg sama: jangan TP-TP terus (pattern flag), reset & tunggu
+					lastTargetName = nil
+					task.wait(CONFIG.autoStealInterval + math.random() * CONFIG.stealJitter)
+				else
+					lastTargetName = name
+					State.busy = true
+					goTo(target, true)
+					task.wait(0.35 + math.random() * CONFIG.stealJitter)
+					State.busy = false
+				end
 			end
-			task.wait(CONFIG.autoStealInterval)
+			task.wait(CONFIG.autoStealInterval + math.random() * CONFIG.stealJitter)
 		end
 		autoStealRunning = false
 	end)
