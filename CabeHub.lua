@@ -250,6 +250,11 @@ noclip = false,
 infiniteJump = false,
 antiAfk = false,
 fpsBoost = false,
+tpCooldown = 1.5,
+tpSteps = 8,
+tpHopDelay = 0.03,
+tpJitter = 2.0,
+stealJitter = 1.2,
 minRarity = "Rare",
 esp = true,
 espMax = 120,
@@ -530,10 +535,31 @@ if not keep[inst] then destroyESP(inst) end
 end
 updateESPLabels(list)
 end
+local lastTpAt = 0
 local function teleportTo(pos)
 local hrp = rootPart()
 if not hrp or not pos then return false end
-hrp.CFrame = CFrame.new(pos + CONFIG.tpOffset)
+local gap = os.clock() - lastTpAt
+if gap < CONFIG.tpCooldown then
+task.wait(CONFIG.tpCooldown - gap)
+end
+lastTpAt = os.clock()
+local dest = CFrame.new(pos + CONFIG.tpOffset)
+* CFrame.Angles(0, (math.random() - 0.5) * 0.6, 0)
+local start = hrp.CFrame
+local hops = CONFIG.tpSteps + math.random(0, 2)
+for i = 1, hops do
+local alpha = i / hops
+local jit = Vector3.new(
+(math.random() - 0.5) * CONFIG.tpJitter,
+(math.random() - 0.5) * CONFIG.tpJitter * 0.4,
+(math.random() - 0.5) * CONFIG.tpJitter)
+hrp.CFrame = start:Lerp(dest, alpha) + jit
+hrp.AssemblyLinearVelocity = Vector3.zero
+hrp.AssemblyAngularVelocity = Vector3.zero
+task.wait(CONFIG.tpHopDelay)
+end
+hrp.CFrame = dest
 hrp.AssemblyLinearVelocity = Vector3.zero
 hrp.AssemblyAngularVelocity = Vector3.zero
 return true
@@ -580,6 +606,7 @@ local autoStealRunning = false
 local function autoStealLoop()
 if autoStealRunning then return end
 autoStealRunning = true
+local lastTargetName = nil
 task.spawn(function()
 while State.running and CONFIG.autoSteal do
 local target = Logic.best(State.current, {
@@ -587,12 +614,19 @@ maxDistance = CONFIG.autoStealRadius,
 hideOwn = true,
 })
 if target and not State.busy then
+local name = target.inst and target.inst.Name
+if name == lastTargetName then
+lastTargetName = nil
+task.wait(CONFIG.autoStealInterval + math.random() * CONFIG.stealJitter)
+else
+lastTargetName = name
 State.busy = true
 goTo(target, true)
-task.wait(0.35)
+task.wait(0.35 + math.random() * CONFIG.stealJitter)
 State.busy = false
 end
-task.wait(CONFIG.autoStealInterval)
+end
+task.wait(CONFIG.autoStealInterval + math.random() * CONFIG.stealJitter)
 end
 autoStealRunning = false
 end)
